@@ -17,8 +17,7 @@ app = Flask(__name__)
 line_bot_api = LineBotApi(os.getenv("LINE_ACCESS_TOKEN"))
 handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
 
-# 只允許這些群組（留空=不限制）
-ALLOWED_GROUPS = set(filter(None, os.getenv("ALLOWED_GROUPS", "").split(",")))
+ALLOWED_GROUPS = {g.strip() for g in os.getenv("ALLOWED_GROUPS", "").split(",") if g.strip()}
 
 HELP_MSG = (
     "器材租借指令：\n"
@@ -134,24 +133,32 @@ def ping():
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text(event):
 
-    # src = event.source
-    # if hasattr(src, "group_id") and src.group_id:
-    #     gid = src.group_id
-    #     if ALLOWED_GROUPS and gid not in ALLOWED_GROUPS:
-    #        return
-    # elif hasattr(src, "user_id") and src.user_id:
-    #     uid = src.user_id
-    #     if uid != os.getenv("OWNER_USER_ID"):  
-    #         return
-    # else:
-    #     return
+    OWNER = os.getenv("OWNER_USER_ID", "")
+    src   = event.source
+    gid   = getattr(src, "group_id", None)   # 群組才有值
+    uid   = getattr(src, "user_id", None)    # 私訊一定有，群組有時也會有
+
+    logging.info(f"INCOMING gid={gid} uid={uid}")
+
+    if gid:  # 來自群組
+        if ALLOWED_GROUPS and gid not in ALLOWED_GROUPS:
+            logging.info(f"DROP group: {gid} not in {ALLOWED_GROUPS}")
+            return
+        # 群組允許 → 繼續
+
+    elif uid:  # 來自私訊
+        if uid != OWNER:
+            logging.info(f"DROP DM: {uid} != OWNER {OWNER}")
+            return
+        # 只允許你本人 → 繼續
+        gid = None  # 私訊沒有 group_id，後面需要時給 None
+
+    else:
+        logging.info("DROP: unknown source")
+        return
+    
     text = (event.message.text or "").strip()
     lower = text.lower()
-
-    # 可選：限制白名單群組
-    gid = getattr(event.source, "group_id", None)
-    if ALLOWED_GROUPS and gid not in ALLOWED_GROUPS:
-        return
 
     # 輕量指令
     if lower.startswith("!yesno"):
